@@ -165,7 +165,11 @@ Write only the summary, starting with "[CONTEXT SUMMARY]:" prefix."""
             else:
                 raise
 
-        summary = response.choices[0].message.content.strip()
+        content = response.choices[0].message.content
+        # Handle cases where content is not a string (e.g., dict from llama.cpp tool calls)
+        if not isinstance(content, str):
+            content = str(content) if content else ""
+        summary = content.strip()
         if not summary.startswith("[CONTEXT SUMMARY]:"):
             summary = "[CONTEXT SUMMARY]: " + summary
         return summary
