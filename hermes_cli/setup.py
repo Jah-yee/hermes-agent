@@ -595,7 +595,7 @@ def setup_model_provider(config: dict):
             if existing_custom:
                 save_env_value("OPENAI_BASE_URL", "")
                 save_env_value("OPENAI_API_KEY", "")
-            _update_config_for_provider("openai-codex", DEFAULT_CODEX_BASE_URL)
+            _update_config_for_provider("openai-codex", DEFAULT_CODEX_BASE_URL, "gpt-5.3-codex")
         except SystemExit:
             print_warning("OpenAI Codex login was cancelled or failed.")
             print_info("You can try again later with: hermes model")
@@ -933,7 +933,9 @@ def setup_model_provider(config: dict):
                 if custom:
                     config['model'] = custom
                     save_env_value("LLM_MODEL", custom)
-            _update_config_for_provider("openai-codex", DEFAULT_CODEX_BASE_URL)
+            # Pass the model to prevent race condition - use selected model or fall back to default
+            selected_model = config.get('model', 'gpt-5.3-codex')
+            _update_config_for_provider("openai-codex", DEFAULT_CODEX_BASE_URL, selected_model)
         elif selected_provider == "zai":
             # Coding Plan endpoints don't have GLM-5
             is_coding_plan = get_env_value("GLM_BASE_URL") and "coding" in (get_env_value("GLM_BASE_URL") or "")
