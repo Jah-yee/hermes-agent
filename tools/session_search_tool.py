@@ -206,6 +206,79 @@ def session_search(
     query = query.strip()
     limit = min(limit, 5)  # Cap at 5 sessions to avoid excessive LLM calls
 
+    # Validate and prepare FTS5 query:
+    # - Hyphenated terms (e.g., "chat-send") need quotes for exact match
+    # - Preserve existing quoted literals
+    # - Return explicit error for invalid FTS5 input instead of silent failure
+    try:
+        import re
+        # Check if query contains unquoted hyphens (not in quoted strings)
+        # Wrap unquoted hyphenated terms in quotes for exact matching
+        def quote_hyphenated_terms(q: str) -> str:
+            """Wrap unquoted hyphenated terms in quotes for FTS5."""
+            result = []
+            in_quote = False
+            i = 0
+            while i < len(q):
+                char = q[i]
+                if char == '"':
+                    in_quote = not in_quote
+                    result.append(char)
+                elif char == '-' and not in_quote:
+                    # Check if this is part of a hyphenated word (alphanumeric on both sides)
+                    # Look back for start of word
+                    j = i - 1
+                    while j >= 0 and (q[j].isalnum() or q[j] == '_'):
+                        j -= 1
+                    j += 1
+                    # Look forward for end of word
+                    k = i + 1
+                    while k < len(q) and (q[k].isalnum() or q[k] == '_'):
+                        k += 1
+                    # If we have a valid hyphenated term, wrap it
+                    if j < i and i + 1 < k and q[j:i].isalnum() and q[i+1:k].isalnum():
+                        # Already quoted, don't double-quote
+                        if j > 0 and q[j-1] == '"':
+                            result.append(char)
+                        else:
+                            result.append('"')
+                            result.append(q[j:k])
+                            result.append('"')
+                            i = k
+                            continue
+                    else:
+                        result.append(char)
+                else:
+                    result.append(char)
+                i += 1
+            return ''.join(result)
+        
+        # Apply FTS5 query transformation
+        fts_query = quote_hyphenated_terms(query)
+        
+        # Test if FTS5 will accept this query (quick validation)
+        # FTS5 will throw on invalid syntax, so we catch and provide helpful error
+        test_result = db.search_messages(
+            query=fts_query,
+            role_filter=role_list,
+            limit=1,
+            offset=0,
+        )
+        # If we get here with no results but no error, query was valid
+        # Use the transformed query for actual search
+        search_query = fts_query
+    except Exception as e:
+        # If FTS5 parsing fails, return explicit error
+        error_msg = str(e)
+        if "MATCH" in error_msg or "fts5" in error_msg.lower():
+            return json.dumps({
+                "success": False,
+                "error": f"Invalid FTS5 query syntax: {error_msg}. Try using keywords without hyphens, or wrap terms in quotes like 'chat-send'.",
+                "query": query,
+            }, ensure_ascii=False)
+        # Re-raise unexpected errors
+        raise
+
     try:
         # Parse role filter
         role_list = None
@@ -214,7 +287,7 @@ def session_search(
 
         # FTS5 search -- get matches ranked by relevance
         raw_results = db.search_messages(
-            query=query,
+            query=search_query,
             role_filter=role_list,
             limit=50,  # Get more matches to find unique sessions
             offset=0,
